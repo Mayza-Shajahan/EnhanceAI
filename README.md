@@ -1,4 +1,4 @@
-# AI Enhancer App 🚀
+# EnhanceAI 🚀
 
 ## Features
 - Image Enhancement
