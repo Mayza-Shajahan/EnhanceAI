@@ -10,7 +10,7 @@ from tensorflow.keras.layers import Conv2D, Concatenate
 import io
 import cv2
 import os
-from moviepy.editor import ImageSequenceClip
+import time
 
 # ---------------- APP ---------------- #
 app = FastAPI()
@@ -48,7 +48,16 @@ def process_video(video_path):
     cap = cv2.VideoCapture(video_path)
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 24
-    frames = []
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    os.makedirs("temp", exist_ok=True)
+    output_path = "temp/output.mp4"
+
+    # ✅ Browser-compatible codec
+    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
     count = 0
 
     while True:
@@ -56,42 +65,41 @@ def process_video(video_path):
         if not ret:
             break
 
-        # LIMIT frames (IMPORTANT ⚠️)
-        if count > 200:
-            break
+        # Convert BGR → RGB
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        frame_resized = cv2.resize(frame, (512, 512))
+        # Resize for model
+        frame_resized = cv2.resize(frame_rgb, (512, 512))
         img_array = frame_resized / 255.0
         img_array = np.expand_dims(img_array, axis=0)
 
-        A = model.predict(img_array)
-        r = [A[:,:,:,(i*3):(i*3+3)] for i in range(8)]
+        # Model prediction
+        A = model.predict(img_array, verbose=0)
+        r = [A[:, :, :, (i*3):(i*3+3)] for i in range(8)]
 
         x = img_array[0]
         for i in range(8):
             x = x + r[i][0] * (np.power(x, 2) - x)
 
         enhanced = np.clip(x * 255, 0, 255).astype(np.uint8)
-        enhanced = cv2.resize(enhanced, (frame.shape[1], frame.shape[0]))
 
-        frame_path = f"temp/frame_{count}.png"
-        cv2.imwrite(frame_path, cv2.cvtColor(enhanced, cv2.COLOR_RGB2BGR))
+        # Resize back
+        enhanced = cv2.resize(enhanced, (width, height))
 
-        frames.append(frame_path)
+        # RGB → BGR (IMPORTANT)
+        enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_RGB2BGR)
+
+        # Write frame
+        out.write(enhanced_bgr)
+
         count += 1
+        if count % 30 == 0:
+            print(f"Processed {count} frames...")
 
     cap.release()
+    out.release()
 
-    output_path = "temp/output.mp4"
-    clip = ImageSequenceClip(frames, fps=fps)
-    clip.write_videofile(output_path, codec="libx264")
-
-    # cleanup
-    for f in frames:
-        os.remove(f)
-
+    print("✅ Video processing complete:", output_path)
     return output_path
 
 # ---------------- ROUTE ---------------- #
@@ -105,12 +113,20 @@ async def upload(file: UploadFile = File(...)):
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # VIDEO
+    # ---------------- VIDEO ---------------- #
     if filename.endswith((".mp4", ".avi", ".mov")):
         output_path = process_video(input_path)
-        return FileResponse(output_path, media_type="video/mp4")
 
-    # IMAGE
+        # Small delay to ensure file is fully written
+        time.sleep(1)
+
+        return FileResponse(
+            output_path,
+            media_type="video/mp4",
+            filename="enhanced.mp4"
+        )
+
+    # ---------------- IMAGE ---------------- #
     img = Image.open(input_path).convert("RGB")
 
     original_size = img.size
@@ -120,7 +136,7 @@ async def upload(file: UploadFile = File(...)):
     img_array = np.expand_dims(img_array, axis=0)
 
     A = model.predict(img_array)
-    r = [A[:,:,:,(i*3):(i*3+3)] for i in range(8)]
+    r = [A[:, :, :, (i*3):(i*3+3)] for i in range(8)]
 
     x = img_array[0]
     for i in range(8):

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 export default function ImageUpload() {
   const [image, setImage] = useState(null);
   const [preview, setPreview] = useState(null);
-
+  const isVideo = image && image.type.startsWith("video");
   const handleDrop = (e) => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
@@ -29,7 +29,14 @@ export default function ImageUpload() {
     });
 
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+
+    const fileType = image.type.startsWith("video")
+      ? "video/mp4"
+      : "image/png";
+
+    const fixedBlob = new Blob([blob], { type: fileType });
+    const url = URL.createObjectURL(fixedBlob);
+
     setPreview(url);
   };
 
@@ -49,7 +56,7 @@ export default function ImageUpload() {
             <input
               id="fileInput"
               type="file"
-              accept="image/*"
+              accept="image/*,video/*"
               className="hidden"
               onChange={(e) => handleFile(e.target.files[0])}
             />
@@ -57,11 +64,17 @@ export default function ImageUpload() {
 
           {preview && (
             <div className="mt-6">
-              <img
-                src={preview}
-                alt="preview"
-                className="rounded-xl shadow-md max-h-64 mx-auto"
-              />
+              {!isVideo ? (
+                <img
+                  src={preview}
+                  alt="preview"
+                  className="rounded-xl shadow-md max-h-64 mx-auto"
+                />
+              ) : (
+                <video controls className="rounded-xl shadow-md max-h-64 mx-auto">
+                  <source src={preview} type="video/mp4" />
+                </video>
+              )}
             </div>
           )}
 
